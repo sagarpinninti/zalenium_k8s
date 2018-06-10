@@ -1,0 +1,7 @@
+---
+pkgs:
+- docker.io
+- apt-transport-https
+- kubeadm
+- kubelet
+- kubectl

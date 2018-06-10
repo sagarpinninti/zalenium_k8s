@@ -1,0 +1,133 @@
+---
+- hosts: all 
+  vars_files:
+  - group_vars/nodes
+  tasks:
+  - name: Add k8s gpg key
+    apt_key:
+       url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+       state: present
+
+  - name: add k8s repo
+    apt_repository:
+      repo: deb http://apt.kubernetes.io/ kubernetes-xenial main
+      state: present
+      filename: 'k8s'
+
+  - name: update the repos
+    apt:
+      update_cache: yes
+  
+  - name: Install Packages
+    apt: 
+     name: "{{ pkgs }}"
+     state: present
+  
+  - name: Enable docker service 
+    service: 
+      name: docker
+      state: started
+      enabled: yes
+  
+  - name: Copy required files to masternode
+    copy:
+      src: /home/admin/project-k8s-zalenium/deployments
+      dest: /home/admin/
+      owner: admin
+      group: admin
+      mode: 0777
+    when: ansible_hostname == "masternode"
+  
+  - name: Initialize kubeadm
+    shell: sh /home/admin/deployments/token.sh
+    become: sudo
+    ignore_errors: yes
+  
+  - name: Fetch adminconfig file
+    fetch:
+      src: /etc/kubernetes/admin.conf
+      dest: /home/admin/project-k8s-zalenium/config
+      flat: yes
+      become: sudo
+    when: ansible_hostname == "masternode"
+
+  - name: Create .kube directory
+    file:
+      path: /home/admin/.kube
+      state: directory
+      mode: 0777
+      owner: admin
+      group: admin
+    when: ansible_hostname == "masternode"
+
+
+  - name: config file
+    copy: 
+      src: /home/admin/project-k8s-zalenium/config
+      dest: /home/admin/.kube/config
+      owner: admin
+      group: admin
+      mode: 0755
+    when: ansible_hostname == "masternode"
+    ignore_errors: all
+
+  - name: Get join script to control node
+    fetch:
+      src: /home/admin/join.sh
+      dest: /home/admin/project-k8s-zalenium/
+      flat: yes
+      owner: admin
+      group: admin
+      mode: 0777
+    when: ansible_hostname == "masternode"
+  
+  - name: copy join script to nodes
+    copy:
+      src: /home/admin/project-k8s-zalenium/join.sh
+      dest: /home/admin/join.sh
+      mode: 0777
+      owner: admin
+      group: admin
+    when: ansible_hostname == "monion"
+ 
+  - name: Join minion
+    shell: sh /home/admin/join.sh
+    become: sudo
+    ignore_errors: yes
+
+  - name: create pod network
+    shell: kubectl create -f weavenet.yml
+    args:
+      chdir: /home/admin/deployments
+    become: sudo
+    when: ansible_hostname == "masternode"
+  
+  - name: Helm installation
+    shell: sh helm.sh
+    args:
+      chdir: /home/admin/deployments/helm
+    become: sudo
+    when: ansible_hostname == "masternode"
+    ignore_errors: yes
+
+  - name: Wait 5min  until tiller is ready and continue with play
+    wait_for: timeout=300
+    delegate_to: localhost
+
+  - name: Deploy services
+    shell: kubectl create -f .
+    args:
+      chdir: /home/admin/deployments/GIT/kubernetes
+    become: sudo
+    when: ansible_hostname == "masternode"
+    ignore_errors: yes
+
+  - name: Monitoring dashboard deployments
+    shell: sh monitor.sh
+    args:
+      chdir: /home/admin/deployments
+    become: sudo
+    when: ansible_hostname == "masternode"
+    ignore_errors: yes
+
+
